@@ -1,65 +1,76 @@
-import os
+import os, json, random
 import pandas as pd
 from gtts import gTTS
 from moviepy.editor import *
-from datetime import datetime
-import random
+from PIL import Image
 
-# Cria pasta de saída
+# Pastas
 os.makedirs("output", exist_ok=True)
+os.makedirs("assets/images", exist_ok=True)
+os.makedirs("assets/music", exist_ok=True)
 
-# Lê a lista de salmos
+# Lê CSV e pega o próximo "pendente"
 df = pd.read_csv("salmos.csv")
-
-# Seleciona o primeiro salmo pendente
-linha = df[df["Status"] == "pendente"].head(1)
+linha = df[df["Status"]=="pendente"].head(1)
 if linha.empty:
-    print("Nenhum salmo pendente encontrado.")
-    exit()
+    print("Nenhum salmo pendente.")
+    raise SystemExit(0)
 
-salmo_num = int(linha["Salmo"].values[0])
-tema = linha["Tema"].values[0]
+salmo = int(linha["Salmo"].values[0])
+tema  = str(linha["Tema"].values[0])
 
-# Gera o texto principal
-texto = f"Salmo {salmo_num}. Tema: {tema}. Louvemos ao Senhor. Este é um salmo de fé e esperança."
+# Título/descrição para facilitar upload manual
+title = f"Salmo {salmo} – {tema} | Oração e Meditação"
+desc  = (
+    f"Oração e meditação no Salmo {salmo} ({tema}).\n\n"
+    "Inscreva-se para receber orações diárias.\n"
+    f"#salmo{salmo} #oração #fé #esperança"
+)
 
-# Cria o áudio
+# Texto falado (curto e universal)
+texto = f"Salmo {salmo}. Tema: {tema}. Senhor, recebe nossa oração. Guia-nos com fé e esperança. Amém."
+
+# Narração
 tts = gTTS(text=texto, lang="pt", slow=False)
 tts.save("output/audio.mp3")
-
-# Cria o vídeo
-if not os.path.exists("assets"):
-    os.makedirs("assets/images", exist_ok=True)
-    os.makedirs("assets/music", exist_ok=True)
-
-# Imagem de fundo (pega uma imagem qualquer da pasta)
-imagens = [f"assets/images/{f}" for f in os.listdir("assets/images") if f.lower().endswith((".jpg", ".png"))]
-imagem_fundo = random.choice(imagens) if imagens else None
-
-# Música de fundo
-musicas = [f"assets/music/{f}" for f in os.listdir("assets/music") if f.lower().endswith((".mp3", ".wav"))]
-musica_fundo = random.choice(musicas) if musicas else None
-
-# Montagem do vídeo
 audio = AudioFileClip("output/audio.mp3")
-duracao = audio.duration
+dur = max(35, audio.duration)  # garante pelo menos ~35s
 
-if imagem_fundo:
-    clip_img = ImageClip(imagem_fundo).set_duration(duracao)
-else:
-    clip_img = ColorClip(size=(1920,1080), color=(0,0,0), duration=duracao)
+# Imagem de fundo (ou tela preta)
+imgs = [f"assets/images/{f}" for f in os.listdir("assets/images") if f.lower().endswith((".jpg",".jpeg",".png"))]
+img_bg = random.choice(imgs) if imgs else None
+clip_bg = ImageClip(img_bg).set_duration(dur) if img_bg else ColorClip(size=(1920,1080), color=(0,0,0), duration=dur)
 
-if musica_fundo:
-    musica = AudioFileClip(musica_fundo).volumex(0.2)
-    audio_final = CompositeAudioClip([audio, musica])
+# Música de fundo (se houver)
+mus = [f"assets/music/{f}" for f in os.listdir("assets/music") if f.lower().endswith((".mp3",".wav",".m4a"))]
+if mus:
+    music = AudioFileClip(random.choice(mus)).volumex(0.18)
+    audio_final = CompositeAudioClip([audio, music.set_duration(dur)])
 else:
     audio_final = audio
 
-video = clip_img.set_audio(audio_final)
-video.write_videofile("output/video.mp4", fps=24)
+# Vídeo final
+video = clip_bg.set_audio(audio_final)
+video.write_videofile("output/video.mp4", fps=24, codec="libx264", audio_codec="aac")
 
-# Atualiza o CSV
-df.loc[df["Salmo"] == salmo_num, "Status"] = "publicado"
+# Thumbnail simples (pega a imagem de fundo ou gera PNG preta)
+thumb_path = "output/thumbnail.jpg"
+if img_bg and os.path.exists(img_bg):
+    # redimensiona para 1280x720 mantendo proporção
+    im = Image.open(img_bg).convert("RGB")
+    im = im.resize((1280, 720))
+    im.save(thumb_path, "JPEG", quality=92)
+else:
+    im = Image.new("RGB", (1280, 720), (0, 0, 0))
+    im.save(thumb_path, "JPEG", quality=92)
+
+# Atualiza CSV (marca como publicado)
+df.loc[df["Salmo"]==salmo, "Status"] = "publicado"
 df.to_csv("salmos.csv", index=False)
 
-print(f"✅ Vídeo do Salmo {salmo_num} gerado com sucesso!")
+# Metadados úteis para upload manual
+with open("output/meta.json","w",encoding="utf-8") as f:
+    json.dump({"salmo": salmo, "tema": tema, "title": title, "description": desc}, f, ensure_ascii=False)
+
+print(f"✅ Vídeo do Salmo {salmo} gerado com sucesso!")
+print(f"Título sugerido: {title}")
