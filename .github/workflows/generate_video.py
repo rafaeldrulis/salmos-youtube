@@ -53,12 +53,11 @@ else:
 video = clip_bg.set_audio(audio_final)
 video.write_videofile("output/video.mp4", fps=24, codec="libx264", audio_codec="aac")
 
-# Thumbnail simples (pega a imagem de fundo ou gera PNG preta)
+# Thumbnail simples (pega a imagem de fundo ou gera JPG preta)
 thumb_path = "output/thumbnail.jpg"
 if img_bg and os.path.exists(img_bg):
-    # redimensiona para 1280x720 mantendo proporção
     im = Image.open(img_bg).convert("RGB")
-    im = im.resize((1280, 720))
+    im = im.resize((1280, 720))   # padrão thumbnail YouTube 16:9
     im.save(thumb_path, "JPEG", quality=92)
 else:
     im = Image.new("RGB", (1280, 720), (0, 0, 0))
