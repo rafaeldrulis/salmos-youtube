@@ -7,15 +7,29 @@ from PIL import Image, ImageDraw
 # ---------- Configs ----------
 WIDTH, HEIGHT = 1920, 1080
 THUMB_W, THUMB_H = 1280, 720
-MUSIC_SECONDS_MIN = 40          # duração mínima da trilha
-SR = 44100                      # sample rate trilha
+MUSIC_SECONDS_MIN = 40
+SR = 44100
 # -----------------------------
 
 os.makedirs("output", exist_ok=True)
 
+# 0) Se não existir salmos.csv na raiz, cria um padrão
+DEFAULT_CSV = """Salmo,Tema,Status
+1,Fé e obediência,pendente
+23,O Senhor é meu pastor,pendente
+27,Confiança e coragem,pendente
+46,Deus é refúgio e fortaleza,pendente
+51,Arrependimento e misericórdia,pendente
+91,Proteção divina,pendente
+121,Socorro que vem do Senhor,pendente
+"""
+if not os.path.exists("salmos.csv"):
+    with open("salmos.csv","w",encoding="utf-8") as f:
+        f.write(DEFAULT_CSV)
+
 # 1) Pegar próximo salmo pendente
 df = pd.read_csv("salmos.csv")
-linha = df[df["Status"] == "pendente"].head(1)
+linha = df[df["Status"].astype(str).str.strip().str.lower() == "pendente"].head(1)
 if linha.empty:
     print("Nenhum salmo pendente.")
     raise SystemExit(0)
@@ -30,14 +44,14 @@ desc  = (
     f"#salmo{salmo} #oração #fé #esperança"
 )
 
-# 2) Texto curto e universal
+# 2) Texto narrado
 texto = f"Salmo {salmo}. Tema: {tema}. Senhor, recebe nossa oração. Guia-nos com fé e esperança. Amém."
 
 # 3) Narração (gTTS)
 nar_path = "output/audio.mp3"
 gTTS(text=texto, lang="pt", slow=False).save(nar_path)
 
-# 4) Trilha ambiente procedural (numPy -> WAV)
+# 4) Trilha ambiente procedural
 def envelope(sig, sr, attack=0.8, release=2.5):
     n = len(sig)
     env = np.ones_like(sig, dtype=np.float32)
@@ -65,7 +79,10 @@ def pad_chord(duration, root_hz=220.0):
 def get_duration(audio_file):
     cmd = f'ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "{audio_file}"'
     out = subprocess.check_output(cmd, shell=True, text=True).strip()
-    return float(out)
+    try:
+        return float(out)
+    except:
+        return 45.0
 
 nar_duration = get_duration(nar_path)
 target_dur = int(max(MUSIC_SECONDS_MIN, nar_duration + 8))
@@ -90,6 +107,7 @@ with wave.open(amb_wav, "w") as wf:
     wf.setframerate(SR)
     wf.writeframes((pad * 32767).astype(np.int16).tobytes())
 
+# 5) Fundo (gradiente + glow)
 def gradient_bg(w, h, top=(15,20,60), bottom=(0,0,0)):
     img = Image.new("RGB", (w, h), bottom)
     draw = ImageDraw.Draw(img)
@@ -114,7 +132,7 @@ bg = gradient_bg(WIDTH, HEIGHT)
 bg_path = "output/bg.jpg"
 bg.save(bg_path, "JPEG", quality=92)
 
-# 6) Mixar narração + música com FFmpeg
+# 6) Mix audio com FFmpeg
 mix_audio = "output/mix.m4a"
 cmd_mix = (
     f'ffmpeg -y -i "{nar_path}" -i "{amb_wav}" '
@@ -124,7 +142,7 @@ cmd_mix = (
 )
 subprocess.run(shlex.split(cmd_mix), check=True)
 
-# 7) Gerar vídeo com imagem estática + áudio final
+# 7) Vídeo com imagem estática + áudio
 video_path = "output/video.mp4"
 cmd_vid = (
     f'ffmpeg -y -loop 1 -i "{bg_path}" -i "{mix_audio}" '
@@ -132,12 +150,17 @@ cmd_vid = (
 )
 subprocess.run(shlex.split(cmd_vid), check=True)
 
-# 8) Atualizar CSV
+# 8) Atualiza CSV marcando o salmo como feito
 df.loc[df["Salmo"] == salmo, "Status"] = "feito"
 df.to_csv("salmos.csv", index=False)
 
-# 9) Salvar metadados
-meta = {"salmo": salmo, "tema": tema, "title": title, "desc": desc}
-json.dump(meta, open("output/meta.json", "w"), ensure_ascii=False, indent=2)
+# 9) Metadados
+meta = {"salmo": salmo, "tema": tema, "title": title, "description": desc}
+with open("output/meta.json","w",encoding="utf-8") as f:
+    json.dump(meta, f, ensure_ascii=False, indent=2)
+
+# 10) Thumbnail
+thumb = bg.resize((THUMB_W, THUMB_H))
+thumb.save("output/thumbnail.jpg", "JPEG", quality=92)
 
 print(f"\n✅ Vídeo gerado com sucesso: {video_path}")
